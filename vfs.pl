@@ -129,10 +129,38 @@ convert_term(call(Term), call(ConvertedTerm)) :-
 convert_term(Term, Term).
 
 % Check if running a term produces expected input/output
-check_io(ExpectedInput, ExpectedOutput, Term) :-
-    with_output_to(string(ActualOutput),
-        with_input_from(string(ExpectedInput),
-            call(Term)
-        )
-    ),
+check_io(ExpectedInput, ExpectedOutput, Goal) :-
+    setup_call_cleanup(
+        % Setup input and output streams
+        (new_memory_file(MemIn),
+         new_memory_file(MemOut),
+         open_memory_file(MemIn, write, WIn),
+         write(WIn, ExpectedInput),
+         close(WIn),
+         open_memory_file(MemIn, read, InStream),
+         open_memory_file(MemOut, write, OutStream)),
+        % Execute goal with redirected I/O
+        (current_input(OldIn),
+         current_output(OldOut),
+         set_input(InStream),
+         set_output(OutStream),
+         (catch(call(Goal), 
+                Error,
+                (set_input(OldIn),
+                 set_output(OldOut),
+                 throw(Error))),
+          set_input(OldIn),
+          set_output(OldOut))),
+        % Cleanup and compare output
+        (close(InStream),
+         close(OutStream),
+         memory_file_to_string(MemOut, ActualOutput),
+         free_memory_file(MemIn),
+         free_memory_file(MemOut))),
     ExpectedOutput = ActualOutput.
+
+% Helper predicate to read a line with proper handling of end of file
+read_line_safe(Line) :-
+    catch(read_line_to_string(current_input, Line),
+          error(io_error(read,_), _),
+          Line = end_of_file).

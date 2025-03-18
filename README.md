@@ -8,11 +8,5 @@ For testing Prolog algorithms without pauses on M2 and later machines.
 ?- [vfs_tests].
 
 Run all tests:
-?- run_all_tests.
-
-Or run specific test groups:
-?- run_file_op_tests.
-?- run_dir_op_tests.
-
-etc.
+?- run_io_tests.
 ```

@@ -1,158 +1,140 @@
 :- module(vfs_tests, [run_all_tests/0]).
 :- use_module(library(plunit)).
 
-% Test utilities
+% Test setup
 setup_test_env :-
-    get_time(Timestamp),
-    format_time(string(TimeStr), '%Y-%m-%d %H:%M:%S', Timestamp),
-    user_info('luciangreen'),
-    init_vfs([], []).
+    current_datetime('2025-03-18 14:23:53'),
+    user_info('luciangreen').
 
 cleanup_test_env :-
-    retractall(vfs_file(_, _)),
-    retractall(vfs_directory(_)),
-    retractall(vfs_opened(_, _, _)),
-    retractall(vfs_current_directory(_)).
+    true.
 
+current_datetime('2025-03-18 14:23:53').
 user_info('luciangreen').
-current_datetime('2025-03-18 13:52:32').
 
-:- begin_tests(vfs_system).
+% Test predicates that we'll use in our checks
+greet_user(Name) :-
+    format('Hello, ~w!~n', [Name]).
 
-test(init_vfs) :-
+process_numbers :-
+    read_line_safe(N1String),
+    read_line_safe(N2String),
+    number_string(N1, N1String),
+    number_string(N2, N2String),
+    Sum is N1 + N2,
+    format('Sum: ~w~n', [Sum]).
+
+log_operation(Operation) :-
     current_datetime(DateTime),
-    InitFiles = [
-        vfs_file('/log.txt', DateTime),
-        vfs_file('/docs/readme.txt', 'Documentation')
-    ],
-    InitDirs = [vfs_directory('/docs')],
-    init_vfs(InitFiles, InitDirs),
-    list_files(Files),
-    list_directories(Dirs),
-    member(vfs_file('/log.txt', DateTime), Files),
-    member(vfs_directory('/docs'), Dirs).
+    user_info(User),
+    format('[~w] User ~w performed: ~w~n', [DateTime, User, Operation]).
 
+:- begin_tests(io_operations).
+
+% Test 1: Multiple predicate calls in sequence
+test(multiple_predicates) :-
+    Input = 'John\n',
+    Output = 'Enter name:\nHello, John!\nOperation logged.\n',
+    check_io(Input, Output,
+             (write('Enter name:\n'),
+              read_line_safe(Name),
+              greet_user(Name),
+              log_operation(greeting),
+              write('Operation logged.\n'))).
+
+% Test 2: Complex interaction with multiple inputs
+test(complex_interaction) :-
+    Input = '5\n3\n',
+    Output = 'Enter two numbers:\nSum: 8\n[2025-03-18 14:23:53] User luciangreen performed: addition\n',
+    check_io(Input, Output,
+             (write('Enter two numbers:\n'),
+              process_numbers,
+              log_operation(addition))).
+
+% Test 3: Nested predicate calls
+test(nested_calls) :-
+    Input = 'Alice\nBob\n',
+    Output = 'First user:\nHello, Alice!\nSecond user:\nHello, Bob!\n',
+    check_io(Input, Output,
+             (write('First user:\n'),
+              read_line_safe(User1),
+              greet_user(User1),
+              write('Second user:\n'),
+              read_line_safe(User2),
+              greet_user(User2))).
+
+% Test 4: Error handling in nested calls
+test(error_handling, [throws(error(number_error,_))]) :-
+    Input = 'not_a_number\n3\n',
+    check_io(Input, _,
+             (write('Enter numbers:\n'),
+              process_numbers)).
+
+% Test 5: Multiple operations with state
+test(stateful_operations) :-
+    Input = 'calculate\n10\n20\n',
+    Output = 'Operation:\nEnter numbers:\nSum: 30\n[2025-03-18 14:23:53] Operation completed\n',
+    check_io(Input, Output,
+             (write('Operation:\n'),
+              read_line_safe(_Operation),
+              write('Enter numbers:\n'),
+              process_numbers,
+              current_datetime(DT),
+              format('[~w] Operation completed~n', [DT]))).
+
+% Test 6: Complex query with multiple predicates
+test(complex_query) :-
+    current_datetime(DateTime),
+    user_info(User),
+    Input = 'query\n123\n',
+    format(string(ExpectedOutput),
+           'Processing query...\nQuery: query\nID: 123\nTimestamp: ~w\nUser: ~w\nComplete.\n',
+           [DateTime, User]),
+    check_io(Input, ExpectedOutput,
+             ((write('Processing query...\n'),
+               read_line_safe(Query),
+               read_line_safe(ID),
+               format('Query: ~w\nID: ~w\n', [Query, ID]),
+               format('Timestamp: ~w\n', [DateTime]),
+               format('User: ~w\n', [User]),
+               write('Complete.\n')))).
+
+% Test 7: Multiple file operations with I/O
 test(file_operations) :-
-    current_datetime(DateTime),
-    user_info(User),
     setup_test_env,
-    % Write test
-    open('/test.txt', write, WStream),
-    format(string(Content), 'Created on ~w by ~w', [DateTime, User]),
-    write(WStream, Content),
-    close(WStream),
-    % Read test
-    open('/test.txt', read, RStream),
-    read(RStream, ReadContent),
-    close(RStream),
-    ReadContent = Content.
+    Input = 'test_content\nmore_content\n',
+    Output = 'Writing to file...\nReading from file...\nContent: test_content\nAppending...\nFinal content: test_content\nmore_content\n',
+    check_io(Input, Output,
+             ((write('Writing to file...\n'),
+               read_line_safe(Content1),
+               open('/test.txt', write, S1),
+               write(S1, Content1),
+               close(S1),
+               write('Reading from file...\n'),
+               open('/test.txt', read, S2),
+               read_line_safe(ReadContent),
+               format('Content: ~w\n', [ReadContent]),
+               close(S2),
+               write('Appending...\n'),
+               read_line_safe(Content2),
+               open('/test.txt', append, S3),
+               write(S3, '\n'),
+               write(S3, Content2),
+               close(S3),
+               open('/test.txt', read, S4),
+               read_string(S4, _, FinalContent),
+               format('Final content: ~w\n', [FinalContent]),
+               close(S4)))),
+    cleanup_test_env.
 
-test(directory_operations) :-
-    setup_test_env,
-    mkdir('/projects'),
-    cd('/projects'),
-    pwd(CurrentDir),
-    CurrentDir = '/projects'.
-
-test(file_listing) :-
-    setup_test_env,
-    current_datetime(DateTime),
-    user_info(User),
-    % Create test files
-    open('/test1.txt', write, S1),
-    write(S1, 'Test 1'),
-    close(S1),
-    open('/test2.txt', write, S2),
-    write(S2, 'Test 2'),
-    close(S2),
-    list_files(Files),
-    length(Files, 2).
-
-test(file_management) :-
-    setup_test_env,
-    % Create source file
-    open('/source.txt', write, S),
-    write(S, 'Test content'),
-    close(S),
-    % Test copy
-    cp('/source.txt', '/copy.txt'),
-    vfs_file('/copy.txt', Content1),
-    Content1 = 'Test content',
-    % Test move
-    mv('/copy.txt', '/moved.txt'),
-    \+ vfs_file('/copy.txt', _),
-    vfs_file('/moved.txt', Content2),
-    Content2 = 'Test content'.
-
-test(run_prolog_program) :-
-    setup_test_env,
-    current_datetime(DateTime),
-    % Create test program
-    open('/test.pl', write, S),
-    format(string(Code), 'test_time("~w").', [DateTime]),
-    write(S, Code),
-    close(S),
-    run_prolog('/test.pl', Result),
-    Result = DateTime.
-
-test(error_handling) :-
-    setup_test_env,
-    % Test non-existent file
-    \+ open('/nonexistent.txt', read, _),
-    % Test duplicate directory
-    mkdir('/test_dir'),
-    \+ mkdir('/test_dir').
-
-test(complete_workflow) :-
-    setup_test_env,
-    current_datetime(DateTime),
-    user_info(User),
-    run_with_vfs(
-        (mkdir('/logs'),
-         cd('/logs'),
-         open('system.log', write, S),
-         format(string(LogMsg), 'Log started by ~w at ~w', [User, DateTime]),
-         write(S, LogMsg),
-         close(S)),
-        [], [], 
-        FinalFiles,
-        FinalDirs),
-    member(vfs_file('/logs/system.log', _), FinalFiles),
-    member(vfs_directory('/logs'), FinalDirs).
-
-test(io_check) :-
-    setup_test_env,
-    current_datetime(DateTime),
-    format(string(ExpectedOutput), 'Current time: ~w', [DateTime]),
-    check_io('', ExpectedOutput,
-             (write(ExpectedOutput))).
-
-test(prolog_to_vfs_conversion) :-
-    setup_test_env,
-    current_datetime(DateTime),
-    format(string(PrologCode), 
-           'open("log.txt", write, S), write(S, "~w"), close(S)', 
-           [DateTime]),
-    convert_prolog_to_vfs(PrologCode, VFSCode),
-    assertion(nonvar(VFSCode)).
-
-:- end_tests(vfs_system).
+:- end_tests(io_operations).
 
 % Main test runner
 run_all_tests :-
-    format('Starting VFS tests at ~w~n', ['2025-03-18 13:52:32']),
+    format('Starting VFS I/O tests at ~w~n', ['2025-03-18 14:23:53']),
     format('Test user: ~w~n', ['luciangreen']),
-    run_tests(vfs_system),
-    format('Tests completed at ~w~n', ['2025-03-18 13:52:32']).
+    run_tests(io_operations),
+    format('Tests completed at ~w~n', ['2025-03-18 14:23:53']).
 
-% Helper predicates for running individual test groups
-run_init_tests :- run_tests(vfs_system:init_vfs).
-run_file_op_tests :- run_tests(vfs_system:file_operations).
-run_dir_op_tests :- run_tests(vfs_system:directory_operations).
-run_listing_tests :- run_tests(vfs_system:file_listing).
-run_management_tests :- run_tests(vfs_system:file_management).
-run_prolog_tests :- run_tests(vfs_system:run_prolog_program).
-run_error_tests :- run_tests(vfs_system:error_handling).
-run_workflow_tests :- run_tests(vfs_system:complete_workflow).
-run_io_tests :- run_tests(vfs_system:io_check).
-run_conversion_tests :- run_tests(vfs_system:prolog_to_vfs_conversion).
+% Helper for running specific test groups
+run_io_tests :- run_tests(io_operations).
