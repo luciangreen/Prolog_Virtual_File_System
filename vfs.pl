@@ -10,9 +10,26 @@
 
 :- dynamic vfs_file/2, vfs_stream/3.
 
+% System predicates that we need to preserve
+preserved_predicates([
+    (is)/2,
+    (=)/2,
+    (==)/2,
+    member/2,
+    append/3,
+    format/2,
+    format/3,
+    write/1,
+    nl/0,
+    call/1,
+    atom_concat/3
+]).
+
 % Check if predicate is a system predicate
 is_system_predicate(Name/Arity) :-
-    current_predicate(system:Name/Arity).
+    current_predicate(system:Name/Arity);
+    preserved_predicates(List),
+    member(Name/Arity, List).
 
 % Initialize VFS with a list of files
 init_vfs(FileList, State) :-
@@ -28,14 +45,14 @@ assert_vfs_file(vfs_file(Name, Contents)) :-
 % Open a file in the VFS
 open_vfs(FileName, Mode, Stream) :-
     (Mode = read ->
-        vfs_file(FileName, Contents),
+        vfs_file(FileName, Contents) ->
         atom_concat(FileName, '_stream', Stream),
         assertz(vfs_stream(Stream, FileName, Contents))
     ; Mode = write ->
         atom_concat(FileName, '_stream', Stream),
         assertz(vfs_stream(Stream, FileName, ''))
-    ; Mode = append ->
-        vfs_file(FileName, ExistingContents),
+    ; Mode = append,
+      vfs_file(FileName, ExistingContents) ->
         atom_concat(FileName, '_stream', Stream),
         assertz(vfs_stream(Stream, FileName, ExistingContents))
     ).
@@ -67,6 +84,9 @@ convert_to_vfs(Input, Output) :-
 % Convert predicates recursively
 convert_predicates(Var, Var) :- var(Var), !.
 convert_predicates([], []) :- !.
+convert_predicates((A, B), (ConvA, ConvB)) :- !,
+    convert_predicates(A, ConvA),
+    convert_predicates(B, ConvB).
 convert_predicates(Term, ConvertedTerm) :-
     Term =.. [Name|Args],
     (convert_predicate_name(Name, NewName) ->
@@ -77,7 +97,12 @@ convert_predicates(Term, ConvertedTerm) :-
     ).
 
 % Convert specific predicate names
-convert_predicate_name(open, open_vfs).
-convert_predicate_name(read, read_vfs).
-convert_predicate_name(write, write_vfs).
-convert_predicate_name(close, close_vfs).
+convert_predicate_name(Name, NewName) :-
+    member(Name-NewName, [
+        open-open_vfs,
+        read-read_vfs,
+        write-write_vfs,
+        close-close_vfs
+    ]),
+    \+ is_system_predicate(Name/2),
+    \+ is_system_predicate(Name/3).
