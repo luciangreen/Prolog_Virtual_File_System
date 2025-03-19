@@ -1,166 +1,83 @@
-:- dynamic vfs_file/2, vfs_directory/1, vfs_opened/3, vfs_current_directory/1.
+:- module(vfs, [
+    init_vfs/2,
+    open_vfs/3,
+    read_vfs/2,
+    write_vfs/2,
+    close_vfs/1,
+    get_vfs_state/1,
+    convert_to_vfs/2
+]).
 
-% Initialize Virtual File System with a given file and directory list
-init_vfs(FileList, DirList) :-
+:- dynamic vfs_file/2, vfs_stream/3.
+
+% Check if predicate is a system predicate
+is_system_predicate(Name/Arity) :-
+    current_predicate(system:Name/Arity).
+
+% Initialize VFS with a list of files
+init_vfs(FileList, State) :-
     retractall(vfs_file(_, _)),
-    retractall(vfs_directory(_)),
-    retractall(vfs_current_directory(_)),
-    maplist(assertz, FileList),
-    maplist(assertz, DirList),
-    assertz(vfs_current_directory('/')).
+    retractall(vfs_stream(_, _, _)),
+    maplist(assert_vfs_file, FileList),
+    get_vfs_state(State).
 
-% Open a file (simulate opening by asserting it as 'opened')
-open(FileName, Mode, Stream) :-
-    (   Mode = read
-    ->  vfs_file(FileName, Contents),
+% Assert a single file into VFS
+assert_vfs_file(vfs_file(Name, Contents)) :-
+    assertz(vfs_file(Name, Contents)).
+
+% Open a file in the VFS
+open_vfs(FileName, Mode, Stream) :-
+    (Mode = read ->
+        vfs_file(FileName, Contents),
         atom_concat(FileName, '_stream', Stream),
-        assertz(vfs_opened(Stream, FileName, Contents))
-    ;   Mode = write,
+        assertz(vfs_stream(Stream, FileName, Contents))
+    ; Mode = write ->
         atom_concat(FileName, '_stream', Stream),
-        assertz(vfs_opened(Stream, FileName, ''))
-    ;   Mode = append,
+        assertz(vfs_stream(Stream, FileName, ''))
+    ; Mode = append ->
         vfs_file(FileName, ExistingContents),
         atom_concat(FileName, '_stream', Stream),
-        assertz(vfs_opened(Stream, FileName, ExistingContents))
+        assertz(vfs_stream(Stream, FileName, ExistingContents))
     ).
 
-% Read from an open file
-read(Stream, Contents) :-
-    vfs_opened(Stream, _, Contents).
+% Read from a VFS stream
+read_vfs(Stream, Contents) :-
+    vfs_stream(Stream, _, Contents).
 
-% Write to an open file
-write(Stream, NewContents) :-
-    retract(vfs_opened(Stream, FileName, _)),
-    assertz(vfs_opened(Stream, FileName, NewContents)).
+% Write to a VFS stream
+write_vfs(Stream, NewContents) :-
+    retract(vfs_stream(Stream, FileName, _)),
+    assertz(vfs_stream(Stream, FileName, NewContents)).
 
-% Append to an open file
-append(Stream, ExtraContents) :-
-    vfs_opened(Stream, FileName, OldContents),
-    atom_concat(OldContents, ExtraContents, NewContents),
-    retract(vfs_opened(Stream, FileName, _)),
-    assertz(vfs_opened(Stream, FileName, NewContents)).
-
-% Close a file and persist changes
-close(Stream) :-
-    vfs_opened(Stream, FileName, Contents),
-    retract(vfs_opened(Stream, FileName, Contents)),
+% Close a VFS stream and update file contents
+close_vfs(Stream) :-
+    vfs_stream(Stream, FileName, Contents),
+    retract(vfs_stream(Stream, FileName, Contents)),
     retractall(vfs_file(FileName, _)),
     assertz(vfs_file(FileName, Contents)).
 
-% List all files in the virtual file system
-list_files(FileList) :-
-    findall(FileName-Contents, vfs_file(FileName, Contents), FileList).
+% Get current VFS state as a list of vfs_file terms
+get_vfs_state(State) :-
+    findall(vfs_file(Name, Contents), vfs_file(Name, Contents), State).
 
-% List all directories in the virtual file system
-list_directories(DirList) :-
-    findall(Dir, vfs_directory(Dir), DirList).
+% Convert regular Prolog code to VFS-compatible code
+convert_to_vfs(Input, Output) :-
+    convert_predicates(Input, Output).
 
-% Create a new directory
-mkdir(DirName) :-
-    \+ vfs_directory(DirName),
-    assertz(vfs_directory(DirName)).
+% Convert predicates recursively
+convert_predicates(Var, Var) :- var(Var), !.
+convert_predicates([], []) :- !.
+convert_predicates(Term, ConvertedTerm) :-
+    Term =.. [Name|Args],
+    (convert_predicate_name(Name, NewName) ->
+        maplist(convert_predicates, Args, NewArgs),
+        ConvertedTerm =.. [NewName|NewArgs]
+    ; maplist(convert_predicates, Args, NewArgs),
+        ConvertedTerm =.. [Name|NewArgs]
+    ).
 
-% Remove a directory (if empty)
-rmdir(DirName) :-
-    \+ (vfs_file(File, _), sub_atom(File, 0, _, _, DirName)),
-    retract(vfs_directory(DirName)).
-
-% Remove a file
-rm(FileName) :-
-    retractall(vfs_file(FileName, _)).
-
-% Rename a file
-mv(OldName, NewName) :-
-    vfs_file(OldName, Contents),
-    assertz(vfs_file(NewName, Contents)),
-    retract(vfs_file(OldName, _)).
-
-% Copy a file
-cp(Source, Dest) :-
-    vfs_file(Source, Contents),
-    assertz(vfs_file(Dest, Contents)).
-
-% Change the current directory
-cd(DirName) :-
-    vfs_directory(DirName),
-    retractall(vfs_current_directory(_)),
-    assertz(vfs_current_directory(DirName)).
-
-% Get the current directory
-pwd(CurrentDir) :-
-    vfs_current_directory(CurrentDir).
-
-% Execute the given algorithm while preserving VFS state
-run_with_vfs(Algorithm, InitialFiles, InitialDirs, FinalFiles, FinalDirs) :-
-    init_vfs(InitialFiles, InitialDirs),
-    call(Algorithm),
-    list_files(FinalFiles),
-    list_directories(FinalDirs).
-
-% Run a Prolog program stored in a virtual file
-run_prolog(FileName, Result) :-
-    vfs_file(FileName, Code),
-    term_string(Term, Code),
-    call(Term, Result).
-
-% Convert a Prolog program to Virtual File System commands
-convert_prolog_to_vfs(PrologCode, VFSCode) :-
-    term_string(PrologTerm, PrologCode),
-    convert_term(PrologTerm, VFSCode).
-
-% Convert terms recursively to replace Prolog file operations with VFS equivalents
-convert_term(open(File, Mode, Stream), open(File, Mode, Stream)).
-convert_term(read(Stream, Content), read(Stream, Content)).
-convert_term(write(Stream, Content), write(Stream, Content)).
-convert_term(append(Stream, Content), append(Stream, Content)).
-convert_term(close(Stream), close(Stream)).
-convert_term(cd(Dir), cd(Dir)).
-convert_term(pwd(Dir), pwd(Dir)).
-convert_term(rm(File), rm(File)).
-convert_term(mv(Old, New), mv(Old, New)).
-convert_term(cp(Src, Dest), cp(Src, Dest)).
-convert_term(mkdir(Dir), mkdir(Dir)).
-convert_term(rmdir(Dir), rmdir(Dir)).
-convert_term(list_files(Files), list_files(Files)).
-convert_term(list_directories(Dirs), list_directories(Dirs)).
-convert_term(run_prolog(File, Result), run_prolog(File, Result)).
-convert_term(call(Term), call(ConvertedTerm)) :-
-    convert_term(Term, ConvertedTerm).
-convert_term(Term, Term).
-
-% Check if running a term produces expected input/output
-check_io(ExpectedInput, ExpectedOutput, Goal) :-
-    setup_call_cleanup(
-        % Setup input and output streams
-        (new_memory_file(MemIn),
-         new_memory_file(MemOut),
-         open_memory_file(MemIn, write, WIn),
-         write(WIn, ExpectedInput),
-         close(WIn),
-         open_memory_file(MemIn, read, InStream),
-         open_memory_file(MemOut, write, OutStream)),
-        % Execute goal with redirected I/O
-        (current_input(OldIn),
-         current_output(OldOut),
-         set_input(InStream),
-         set_output(OutStream),
-         (catch(call(Goal), 
-                Error,
-                (set_input(OldIn),
-                 set_output(OldOut),
-                 throw(Error))),
-          set_input(OldIn),
-          set_output(OldOut))),
-        % Cleanup and compare output
-        (close(InStream),
-         close(OutStream),
-         memory_file_to_string(MemOut, ActualOutput),
-         free_memory_file(MemIn),
-         free_memory_file(MemOut))),
-    ExpectedOutput = ActualOutput.
-
-% Helper predicate to read a line with proper handling of end of file
-read_line_safe(Line) :-
-    catch(read_line_to_string(current_input, Line),
-          error(io_error(read,_), _),
-          Line = end_of_file).
+% Convert specific predicate names
+convert_predicate_name(open, open_vfs).
+convert_predicate_name(read, read_vfs).
+convert_predicate_name(write, write_vfs).
+convert_predicate_name(close, close_vfs).
