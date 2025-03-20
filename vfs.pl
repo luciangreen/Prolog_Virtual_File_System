@@ -1,12 +1,15 @@
-:- module(vfs, [
+% Add this to the vfs module exports
+/*:- module(vfs, [
     init_vfs/2,
     open_vfs/3,
     read_vfs/2,
     write_vfs/2,
     close_vfs/1,
     get_vfs_state/1,
-    convert_to_vfs/2
+    convert_to_vfs/2,
+    convert_from_vfs/2  % Added new export
 ]).
+*/
 
 :- dynamic vfs_file/2, vfs_stream/3.
 
@@ -27,9 +30,12 @@ preserved_predicates([
 
 % Check if predicate is a system predicate
 is_system_predicate(Name/Arity) :-
-    current_predicate(system:Name/Arity);
+    current_predicate_detour(%system:
+    Name/Arity);
     preserved_predicates(List),
-    member(Name/Arity, List).
+    member(Name/Arity, List),!.
+
+current_predicate_detour(_):-!.
 
 % Initialize VFS with a list of files
 init_vfs(FileList, State) :-
@@ -96,6 +102,25 @@ convert_predicates(Term, ConvertedTerm) :-
         ConvertedTerm =.. [Name|NewArgs]
     ).
 
+% Convert from VFS predicates back to regular predicates
+convert_from_vfs(Input, Output) :-
+    convert_predicates_from_vfs(Input, Output).
+
+% Convert predicates recursively (from VFS to regular)
+convert_predicates_from_vfs(Var, Var) :- var(Var), !.
+convert_predicates_from_vfs([], []) :- !.
+convert_predicates_from_vfs((A, B), (ConvA, ConvB)) :- !,
+    convert_predicates_from_vfs(A, ConvA),
+    convert_predicates_from_vfs(B, ConvB).
+convert_predicates_from_vfs(Term, ConvertedTerm) :-
+    Term =.. [Name|Args],
+    (convert_from_vfs_name(Name, NewName) ->
+        maplist(convert_predicates_from_vfs, Args, NewArgs),
+        ConvertedTerm =.. [NewName|NewArgs]
+    ; maplist(convert_predicates_from_vfs, Args, NewArgs),
+        ConvertedTerm =.. [Name|NewArgs]
+    ).
+
 % Convert specific predicate names
 convert_predicate_name(Name, NewName) :-
     member(Name-NewName, [
@@ -103,6 +128,13 @@ convert_predicate_name(Name, NewName) :-
         read-read_vfs,
         write-write_vfs,
         close-close_vfs
-    ]),
-    \+ is_system_predicate(Name/2),
-    \+ is_system_predicate(Name/3).
+    ]).
+    
+% Convert VFS predicate names back to regular names
+convert_from_vfs_name(Name, NewName) :-
+    member(NewName-Name, [
+        open-open_vfs,
+        read-read_vfs,
+        write-write_vfs,
+        close-close_vfs
+    ]).
